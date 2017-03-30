@@ -57,6 +57,10 @@ class DAG:
         else:
             raise KeyError("vertex %s not in graph" % x)
 
+    # TODO: implement list of incoming edges, so we can later use it to create
+    #       a table of conditional probabilities of a node given its parents
+    # (consider implementing this in bayes net. implementation not here)
+
     # lists all vertices y such that there is an edge from the vertices x to y
     def neighbors(self, x):
         if x in self.graph.keys():
@@ -147,7 +151,10 @@ class DAG:
 
 
 def __test_DAG(crash=False):
-    """test Graph class, return True if test successful"""
+    """
+    test Graph class, return set of
+    characters representing success of each test
+    """
 
     def test_vertex(crash):
         try:
