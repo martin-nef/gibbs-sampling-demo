@@ -4,7 +4,7 @@ from dag import *
 
 _DISABLE_SCROLLING = True
 NODE = "node"
-ARC = "arc"
+ARC = "edge"
 TEXT = "text"
 IN = 1
 OUT = 0
@@ -60,7 +60,7 @@ class CanvasObject:
         del self
 
 
-class Arc(CanvasObject):
+class Edge(CanvasObject):
 
     def __init__(self, objectID, canvas):
         self.objectID = objectID
@@ -69,20 +69,27 @@ class Arc(CanvasObject):
         self.vertex = Vertex(objectID)
         self.parents = ()
 
+    def __str__(self):
+        return "(objectID:%s, tags:%s, parents:%s)" % (str(self.objectID), str(self.tags), str(self.parents))
+
+    def __repr__(self):
+        return "(objectID:%s, tags:%s, parents:%s)" % (str(self.objectID), str(self.tags), str(self.parents))
+
     def add_parents(self, from_, to):
         if self.parents:
-            notify_error("Arc Error", "Arc already has parents")
+            notify_error("Edge Error", "Edge already has parents")
             return
         self.parents = (from_, to)
 
     def delete(self):
         try:
             if self.parents:
-                self.canvas.network.remove_edge(parents[0], parents[1])
+                self.canvas.network.remove_edge(self.parents[0], self.parents[1])
         except KeyError:
-            notify_error("Delete error", "Arc's parent(s) not in graph.")
+            pass
+            # notify_error("Delete error", "Edge's parent(s) not in graph.")
         except ValueError:
-            notify_error("Delete error", "Specified arc does not exist.")
+            notify_error("Delete error", "Specified edge does not exist.")
         del self.canvas.canvas_objects[self.objectID]
         self.canvas.delete(self.objectID)
         del self
@@ -92,9 +99,9 @@ class Arc(CanvasObject):
         x2, y2 = self.parents[1].get_centre()
         coords = [x1, y1, x2, y2]
 
-        (xo, yo) = self.parents[1].get_arc_offsets()
+        (xo, yo) = self.parents[1].get_edge_offsets()
         (xd1, yd1) = self.get_direction(xmagnitude=xo, ymagnitude=yo)
-        (xo, yo) = self.parents[0].get_arc_offsets()
+        (xo, yo) = self.parents[0].get_edge_offsets()
         (xd0, yd0) = self.get_direction(xmagnitude=xo, ymagnitude=yo)
         coords = [coords[0] + xd0, coords[1] + yd0,
                   coords[2] - xd1, coords[3] - yd1]
@@ -128,8 +135,8 @@ class Node(CanvasObject):
         self.tags = set()
         self.name = name
         self.vertex = Vertex(objectID)
-        self.arcs_in = set()
-        self.arcs_out = set()
+        self.edges_in = set()
+        self.edges_out = set()
         self.label = None
 
     def __str__(self):
@@ -139,7 +146,7 @@ class Node(CanvasObject):
         return "(name:%s, objectID:%s, tags:%s)" % (str(self.name), str(self.objectID), str(self.tags))
 
     def delete(self):
-        if self.arcs_out and False:
+        if self.edges_out and False:
             # TODO: test if that is actually the case. Maybe there is a better
             # way of handling this
             # P.S. actually better to allow this but check that graph is
@@ -147,22 +154,23 @@ class Node(CanvasObject):
             notify_error("Delete Error",
                          "Cannot remove node with outgoing connections")
             return
-        for arc in self.arcs_in:
-            arc.delete()
+        for edge in self.edges_in:
+            edge.delete()
+        for edge in self.edges_out:
+            edge.delete()
         self.canvas.network.remove_vertex(self.vertex)
         self.canvas.delete(self.objectID)
-        self.arcs_in
         self.label.delete()
         del self.canvas.canvas_objects[self.objectID]
         del self
 
-    def add_arc_inc(self, arc):
-        """ add incoming arc to node """
-        self.arcs_in.add(arc)
+    def add_edge_inc(self, edge):
+        """ add incoming edge to node """
+        self.edges_in.add(edge)
 
-    def add_arc_out(self, arc):
-        """ add outgoing arc to node """
-        self.arcs_out.add(arc)
+    def add_edge_out(self, edge):
+        """ add outgoing edge to node """
+        self.edges_out.add(edge)
 
     def move(self, event):
         coords = self.canvas.coords(self.objectID)
@@ -173,12 +181,12 @@ class Node(CanvasObject):
                            event.x + xsize, event.y + ysize)
         self.canvas.coords(self.label.objectID,
                            event.x, event.y)
-        for arc in self.arcs_in:
-            arc.move(IN)
-        for arc in self.arcs_out:
-            arc.move(OUT)
+        for edge in self.edges_in:
+            edge.move(IN)
+        for edge in self.edges_out:
+            edge.move(OUT)
 
-    def get_arc_offsets(self):
+    def get_edge_offsets(self):
         coords = self.get_coords()
         x = (coords[0] - coords[2]) / 2
         y = (coords[1] - coords[3]) / 2
@@ -199,7 +207,7 @@ class NetworkManager(tkinter.Canvas):
         self._node_name = None
         self._adding_node = False
         self._connecting_nodes = False
-        self._selected_arc = None
+        self._selected_edge = None
         self._selected_node = None
         self._dragged_node = None
         self.network = DAG()
@@ -216,18 +224,13 @@ class NetworkManager(tkinter.Canvas):
                                   command=self.connect_node)
         self.nodeMenu.add_command(label="Remove node",
                                   command=self.remove_node)
+        self.nodeMenu.add_command(label="Edit node",
+                                  command=self.edit_node)
 
         # bind dragging to LMB
         self.bind("<Button-1>", self.clickHandler)
         self.bind("<B1-Motion>", self.dragHandler)
         self.bind("<Motion>", self.motionHandler)
-
-    def notify(self, title, message):
-        messagebox.showinfo(title, message)
-
-    def notify_error(self, title, message):
-        messagebox.showerror(title, message)
-        # raise Exception(title, message)
 
     def text_dialog(self):
         input_box = tkinter.Toplevel()
@@ -267,14 +270,14 @@ class NetworkManager(tkinter.Canvas):
         td = self.text_dialog()
         self.wait_window(td)
         if self._node_name == "":
-            self.notify_error("Node Error", "Node name cannot be blank.")
+            notify_error("Node Error", "Node name cannot be blank.")
         if not self._node_name:
             self._node_name = None
             self._adding_node = False
             return
         try:
-            if any([self._node_name == obj.name for obj in self.canvas_objects.values()]):
-                self.notify_error(
+            if any([self._node_name == obj.name for obj in self.get_all_nodes()]):
+                notify_error(
                     "Node Error", "Node with that name already exists.")
                 self._node_name = None
                 self._adding_node = False
@@ -304,8 +307,15 @@ class NetworkManager(tkinter.Canvas):
         except KeyError:
             del self.canvas_objects[new_node]
             self.delete(new_node)
-            self.notify_error("Node Error", "Node already exists.")
+            notify_error("Node Error", "Node already exists.")
         self._adding_node = False
+
+    def get_all_nodes(self):
+        all_nodes = []
+        for obj in self.canvas_objects.values():
+            if NODE in obj.tags:
+                all_nodes.append(obj)
+        return all_nodes
 
     def remove_node(self):
         """ remove node from canvas and network """
@@ -320,11 +330,11 @@ class NetworkManager(tkinter.Canvas):
                                     tags=(ARC), arrow=tkinter.LAST, arrowshape=(
                                         15, 18, 10),
                                     smooth=True, width=2)
-        self._selected_arc = Arc(new_line, self)
-        self._selected_arc.add_tag(ARC)
-        self.canvas_objects[new_line] = self._selected_arc
+        self._selected_edge = Edge(new_line, self)
+        self._selected_edge.add_tag(ARC)
+        self.canvas_objects[new_line] = self._selected_edge
         # self.tag_raise(self._selected_node.objectID,
-        #                self._selected_arc.objectID)
+        #                self._selected_edge.objectID)
         self._connecting_nodes = True
 
     def _finalise_connection(self, node):
@@ -334,33 +344,33 @@ class NetworkManager(tkinter.Canvas):
                 self.network.add_edge(self._selected_node.vertex, node.vertex)
             else:
                 cleanup = True
-                self.notify_error("Connection Error", "An arc from %s to %s already exists." % (
+                notify_error("Connection Error", "An edge from %s to %s already exists." % (
                     self._selected_node.name, node.name))
         except ValueError:
             cleanup = True
-            self.notify_error("Connection Error",
+            notify_error("Connection Error",
                               "Connection would cause a cycle, aborting.")
         except KeyError:
             cleanup = True
-            self.notify_error("Connection Error",
+            notify_error("Connection Error",
                               "One of the nodes is not in the graph.")
         if cleanup:
-            self._selected_arc.delete()
+            self._selected_edge.delete()
         else:
-            self._selected_arc.add_parents(self._selected_node, node)
-            self._selected_node.add_arc_out(self._selected_arc)
-            node.add_arc_inc(self._selected_arc)
-            # self._selected_arc.move(IN)
+            self._selected_edge.add_parents(self._selected_node, node)
+            self._selected_node.add_edge_out(self._selected_edge)
+            node.add_edge_inc(self._selected_edge)
+            # self._selected_edge.move(IN)
 
         self._selected_node = None
-        self._selected_arc = None
+        self._selected_edge = None
         self._connecting_nodes = False
 
     def _cancel_connection(self):
-        self._selected_arc.delete()
+        self._selected_edge.delete()
         self._connecting_nodes = False
         self._selected_node = None
-        self._selected_arc = None
+        self._selected_edge = None
         self._selected_node = None
 
     def get_node(self, x, y):
@@ -373,8 +383,8 @@ class NetworkManager(tkinter.Canvas):
                     pass
         return None
 
-    def configure_node(self, objectID):
-        pass
+    def edit_node(self):
+        print("not implemented")
 
     def menuHandler(self, event):
         "bring up the context menu"
@@ -393,10 +403,10 @@ class NetworkManager(tkinter.Canvas):
     def motionHandler(self, event):
         self.motionevent = event
         if self._connecting_nodes:
-            if self._selected_arc:
-                coords = self._selected_arc.get_coords()
+            if self._selected_edge:
+                coords = self._selected_edge.get_coords()
                 coords = [coords[0], coords[1], event.x, event.y]
-                self._selected_arc.set_coords(coords)
+                self._selected_edge.set_coords(coords)
 
     def clickHandler(self, event):
         "on LMB drag nodes or reposition canvas"
@@ -410,6 +420,8 @@ class NetworkManager(tkinter.Canvas):
                 self._cancel_connection()
         else:
             self._dragged_node = self.get_node(event.x, event.y)
+            if not self._dragged_node:
+                return
             self.tag_raise(self._dragged_node.objectID)
             self.tag_raise(self._dragged_node.label.objectID,
                            self._dragged_node.objectID)
@@ -480,7 +492,7 @@ class GUI(tkinter.Frame):
             column=3, row=0, rowspan=3, sticky=tkinter.N + tkinter.S)
 
         self.printButton = tkinter.Button(self.buttonContainer)
-        self.printButton["text"] = "print test"
+        self.printButton["text"] = "print network"
         self.printButton["fg"] = "blue"
         self.printButton["command"] = self.testfunc
         self.printButton.grid()
@@ -538,11 +550,19 @@ class GUI(tkinter.Frame):
         self.master.title(title)
 
     def testfunc(self):
+        print("Canvas:")
+        print(str(self.network_manager.canvas_objects).replace("), ", "),\n"))
         print("DAG:")
         print(self.network_manager.network)
-        print("Canvas:")
-        print(self.network_manager.canvas_objects)
-        print()
+
+
+def notify(title, message):
+    messagebox.showinfo(title, message)
+
+
+def notify_error(title, message):
+    messagebox.showerror(title, message)
+    # raise Exception(title, message)
 
 
 if __name__ == '__main__':

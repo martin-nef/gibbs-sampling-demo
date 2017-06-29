@@ -16,15 +16,6 @@ class Vertex(str):
         self.node = node
         self.in_degree = None
 
-    # def __repr__(self):
-    #     return "[" + repr(self.node) + ", " + repr(self.in_degree) + "]"
-
-    # def __str__(self):
-    #     return repr(self.node)
-
-    # def __hash__(self):
-    #     return hash(self.node)
-
 
 class DAG:
 
@@ -57,11 +48,7 @@ class DAG:
         else:
             raise KeyError("vertex %s not in graph" % x)
 
-    # TODO: implement list of incoming edges, so we can later use it to create
-    #       a table of conditional probabilities of a node given its parents
-    # (consider implementing this in bayes net. implementation not here)
-
-    # lists all vertices y such that there is an edge from the vertices x to y
+    # lists all vertices y such that there is an edge from the verticex x to y
     def neighbors(self, x):
         if x in self.graph:
             return self.graph[x]
@@ -86,7 +73,7 @@ class DAG:
             if vertex in edges:
                 edges.remove(vertex)
 
-    # adds the edge from the vertices x to y
+    # adds the edge from vertex x to y
     def add_edge(self, x, y):
         if x in self.graph and y in self.graph:
             self.graph[x].add(y)
@@ -97,6 +84,7 @@ class DAG:
         else:
             raise KeyError("vertex %s or %s not in graph" % (x, y))
 
+    # remove edge from vertex x to y
     def remove_edge(self, x, y):
         if x in self.graph:
             if y in self.graph[x]:
@@ -107,19 +95,12 @@ class DAG:
             raise KeyError("vertex %s not in graph" % x)
 
     def is_valid(self):
-        try:
-            self.topological_ordering()
-        except DAGError:
-            return False
-        return True
-
-    def topological_ordering(self):
         """
         returns a list containing vertices in topological ordering
         raises DAGError if topological ordering cannot be found,
         i.e. graph has cycles.
         """
-        ordered = []
+        nodes_visited = 0
         queue = deque()
         # find in-degree for each vertex
         for v in self.graph:
@@ -135,8 +116,12 @@ class DAG:
         while len(queue) > 0:
             # pop a vertex with no incoming edges
             v = queue.pop()
-            # add it to the topological ordering
-            ordered.append(v)
+            # increment nodes visited
+            nodes_visited += 1
+            # quit the loop if we visited more nodes than there are in the
+            # graph
+            if nodes_visited > len(self.graph):
+                break
             # decrement in-degree of all edges v -> u
             for u in self.graph[v]:
                 u.in_degree += -1
@@ -144,10 +129,7 @@ class DAG:
                 if u.in_degree == 0:
                     queue.append(u)
 
-        if len(ordered) != len(self.graph):
-            raise DAGError("Failed to find a topological ordering.")
-
-        return ordered
+        return nodes_visited == len(self.graph)
 
 
 def __test_DAG(crash=False):
@@ -170,6 +152,7 @@ def __test_DAG(crash=False):
             return False
 
     def test_add_vertex(crash):
+        test1 = False
         try:
             vertices = [
                 Vertex('A'),
@@ -181,15 +164,28 @@ def __test_DAG(crash=False):
             for v in vertices:
                 g.add_vertex(v)
 
+            test1 = True
             if len(g.graph) != 5:
-                raise Exception("failed to add all vertices to graph")
-            return True
+                if crash:
+                    raise Exception("failed to add all vertices to graph")
+                test1 = False
 
         except Exception as e:
             if crash:
                 print("graph: \n" + str(g))
                 raise e
-            return False
+            test1 = False
+
+        test2 = False
+        try:
+            g = DAG()
+            g.add_vertex(Vertex('A'))
+            g.add_vertex(Vertex('A'))
+            test2 = False
+        except KeyError:
+            test2 = True
+
+        return test1 and test2
 
     def test_remove_vertex(crash):
         try:
@@ -219,54 +215,112 @@ def __test_DAG(crash=False):
 
     def test_add_edge(crash):
         try:
-            vertices = [Vertex('A'),
-                        Vertex('B'),
-                        Vertex('C'),
-                        Vertex('D'),
-                        Vertex('E')]
             g = DAG()
-            for v in vertices:
-                g.add_vertex(v)
-            g.add_edge(vertices[1], vertices[2])
-            g.add_edge(vertices[3], vertices[0])
-            return True
-
+            a = Vertex('A')
+            b = Vertex('B')
+            g.add_vertex(a)
+            g.add_vertex(b)
+            g.add_edge(a, b)
+            if b not in g.graph[a]:
+                return False
         except Exception as e:
             if crash:
                 raise e
             return False
+        return True
 
     def test_remove_edge(crash):
         try:
-            return True
+            g = DAG()
+            a = Vertex('A')
+            b = Vertex('B')
+            g.add_vertex(a)
+            g.add_vertex(b)
+            g.add_edge(a, b)
+            g.remove_edge(a, b)
+            if b in g.graph[a]:
+                return False
         except Exception as e:
             if crash:
                 raise e
             return False
+        return True
 
+    def test_is_valid(crash):
+
+        vertices = [Vertex('A'),
+                    Vertex('B'),
+                    Vertex('C'),
+                    Vertex('D'),
+                    Vertex('E')]
+        g = DAG()
+        for v in vertices:
+            g.add_vertex(v)
+        g.add_edge(vertices[1], vertices[2])
+        g.add_edge(vertices[3], vertices[0])
+        g.graph[vertices[2]].add(vertices[1])
+        if g.is_valid():
+            if crash:
+                raise DAGError("Cycle not detected.")
+            return False
+        vertices = [Vertex('A'),
+                    Vertex('B'),
+                    Vertex('C'),
+                    Vertex('D'),
+                    Vertex('E')]
+        g = DAG()
+        for v in vertices:
+            g.add_vertex(v)
+        g.add_edge(vertices[1], vertices[2])
+        g.add_edge(vertices[3], vertices[0])
+        g.add_edge(vertices[3], vertices[2])
+        if not g.is_valid():
+            return False
+        return True
+
+    failed_tests = []
     test = ""
     if test_vertex(crash):
         test += '+'
     else:
         test += '-'
+        failed_tests.append("vertex")
     if test_add_vertex(crash):
         test += '+'
     else:
         test += '-'
+        failed_tests.append("add_vertex")
     if test_remove_vertex(crash):
         test += '+'
     else:
         test += '-'
+        failed_tests.append("remove_vertex")
     if test_add_edge(crash):
         test += '+'
     else:
         test += '-'
+        failed_tests.append("add_edge")
     if test_remove_edge(crash):
         test += '+'
     else:
         test += '-'
+        failed_tests.append("remove_edge")
+    if test_is_valid(crash):
+        test += '+'
+    else:
+        test += '-'
+        failed_tests.append("is_valid")
+    if failed_tests:
+        test += "\nfailed tests: "
+        for failed_test in failed_tests:
+            test += failed_test + ", "
+        test = test[0:len(test) - 2]
     return test
 
 
 if __name__ == "__main__":
-    print(__test_DAG(crash=True))
+    test_results = __test_DAG(True)
+    if test_results == "++++++":
+        print("All tests passed")
+    else:
+        print(test_results.replace("+", "").replace("-", "").replace("\n", "", 1))
